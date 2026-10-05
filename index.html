@@ -91,8 +91,9 @@ button{cursor:pointer}
   border-right:1.5px solid var(--line-strong); border-bottom:1px solid var(--line); padding:0 4px; text-align:center;
 }
 .head .daycell{font-size:11px; font-weight:600; color:var(--muted); min-height:34px}
+.th.last{justify-content:space-between}
 .th{
-  display:flex; align-items:center; justify-content:center; min-height:34px; font-size:11px; font-weight:600;
+  display:flex; align-items:center; justify-content:flex-start; padding:0 4px; min-height:34px; font-size:11px; font-weight:600;
   border-right:1px solid var(--line); border-bottom:1px solid var(--line-strong); font-variant-numeric:tabular-nums;
 }
 .cell{min-height:84px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); cursor:pointer; user-select:none}
@@ -321,6 +322,7 @@ function normalize(o){
   if(typeof o.note==="string")d.note=o.note;
   if(o.time&&Number.isFinite(o.time.start)&&Number.isFinite(o.time.end)&&[15,30,60].includes(o.time.step)&&o.time.end>o.time.start)d.time={start:o.time.start,end:o.time.end,step:o.time.step};
   if(o.v!==2&&d.time.step===30)d.time.step=15;
+  if(d.time.end<t(17,30))d.time.end=t(17,30);
   if(Array.isArray(o.acts)&&o.acts.length)d.acts=o.acts.filter(a=>a&&typeof a.label==="string").map(a=>({id:String(a.id||uid()),label:a.label,color:/^#[0-9a-f]{6}$/i.test(a.color)?a.color:"#dddddd",r:!!a.r}));
   if(Array.isArray(o.blocks))d.blocks=DAYS.map((_,i)=>Array.isArray(o.blocks[i])?o.blocks[i].filter(b=>b&&Number.isFinite(b.s)&&Number.isFinite(b.e)&&b.e>b.s&&typeof b.label==="string").map(b=>({s:b.s,e:b.e,label:b.label,color:/^#[0-9a-f]{6}$/i.test(b.color)?b.color:"#dddddd"})):[]);
   return d;
@@ -373,11 +375,18 @@ function renderChart(){
   if(step<30){
     for(let i=0;i<N;i++){
       const m=start+i*step;
-      if(m%30===0){const sp=(i+1<N)?2:1;h+=`<div class="th" style="grid-column:${i+2} / span ${sp}">${fmt(m)}</div>`;i+=sp-1;}
+      if(m%30===0){
+        const sp=(i+1<N)?2:1,last=i+sp>=N;
+        h+=`<div class="th${last?" last":""}" style="grid-column:${i+2} / span ${sp}">${last?`<span>${fmt(m)}</span><span>${fmt(start+N*step)}</span>`:fmt(m)}</div>`;
+        i+=sp-1;
+      }
       else h+=`<div class="th" style="grid-column:${i+2}"></div>`;
     }
   }else{
-    for(let i=0;i<N;i++)h+=`<div class="th" style="grid-column:${i+2}">${fmt(start+i*step)}</div>`;
+    for(let i=0;i<N;i++){
+      const last=i===N-1;
+      h+=`<div class="th${last?" last":""}" style="grid-column:${i+2}">${last?`<span>${fmt(start+i*step)}</span><span>${fmt(start+N*step)}</span>`:fmt(start+i*step)}</div>`;
+    }
   }
   h+="</div>";
   for(let d=0;d<DAYS.length;d++){
@@ -836,7 +845,10 @@ function drawChart(){
   c.font=`600 24px ${F}`;c.fillStyle=MUTED;c.textAlign="center";
   c.fillText("Hari / Jam",gx+dayW/2,y+headH/2);
   c.fillStyle=INK;
-  const hdrLabel=(i,span)=>{const x=gx+dayW+i*cw;c.fillText(fmt(start+i*step),x+span*cw/2,y+headH/2);
+  c.textAlign="left";
+  const hdrLabel=(i,span)=>{const x=gx+dayW+i*cw;
+    c.textAlign="left";c.fillText(fmt(start+i*step),x+8,y+headH/2);
+    if(i+span>=N){c.textAlign="right";c.fillText(fmt(start+N*step),x+span*cw-8,y+headH/2);c.textAlign="left";}
     c.strokeStyle=LINE;c.lineWidth=1.5;c.beginPath();c.moveTo(x+span*cw,y);c.lineTo(x+span*cw,y+headH);c.stroke();};
   if(step<30){
     for(let i=0;i<N;i++){const mm=start+i*step;if(mm%30===0){const sp=i+1<N?2:1;hdrLabel(i,sp);i+=sp-1;}}
@@ -1420,7 +1432,7 @@ function doRoster(src,ch,fill){
     const used=new Map();
     state.blocks.forEach(l=>l.forEach(x=>{if(!used.has(x.label))used.set(x.label,x.color);}));
     mergeActs([...used].map(([label,color])=>({label,color})));
-    state.time.start=Math.min(state.time.start,t(7,30));state.time.end=Math.max(state.time.end,t(17));
+    state.time.start=Math.min(state.time.start,t(7,30));state.time.end=Math.max(state.time.end,t(17,30));
     if(state.time.step===60)state.time.step=30;
   }
   title.value=state.meta.title;note.value=state.note;
