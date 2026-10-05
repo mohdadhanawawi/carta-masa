@@ -1244,20 +1244,9 @@ function rosterLabels(p,src){
   else if(p.s)rawat+=" "+p.s;
   return{kawasan,rawat,nota};
 }
-function baseTemplate(rawatLabel){
-  const mk=(color,s,e,label)=>({s,e,label,color});
-  const R=(s,e)=>rawatLabel?mk(COL.rawat,s,e,rawatLabel):null;
-  const smrp=(s,e)=>mk(COL.smrp,s,e,"Pengisian SMRP"),pt=(s,e)=>mk(COL.pantau,s,e,"Pemantauan Staf"),dk=(s,e)=>mk(COL.dok,s,e,"Dokumentasi & Loging");
-  const tea=(s,e)=>mk(TEA.color,s,e,TEA.label),rh=(s,e)=>mk(COL.rehat,s,e,"REHAT");
-  const am=()=>[smrp(t(8),t(8,30)),pt(t(8,30),t(9)),R(t(9),t(10,30)),tea(t(10,30),t(10,50)),R(t(10,50),t(12)),pt(t(12),t(12,30)),dk(t(12,30),t(13)),rh(t(13),t(14))];
-  const pmStd=()=>[R(t(14),t(15,30)),pt(t(15,30),t(16,30)),dk(t(16,30),t(17))];
-  return[
-    [...am(),...pmStd()],
-    [...am(),R(t(14),t(15)),mk(COL.mesy,t(15),t(16,30),"Mesyuarat Kawasan (Minggu ke-2) / CME Kawasan (Minggu ke-3)"),dk(t(16,30),t(17))],
-    [...am(),...pmStd()],
-    [...am(),R(t(14),t(15,30)),mk(COL.urus,t(15,30),t(17),"Mesyuarat Pengurusan (mengikut takwim tahunan)")],
-    [smrp(t(8),t(8,30)),pt(t(8,30),t(9)),R(t(9),t(10,30)),tea(t(10,30),t(10,50)),R(t(10,50),t(12)),dk(t(12),t(12,15)),rh(t(12,15),t(14,45)),mk(COL.cme,t(14,45),t(16,30),"CME Jabatan (Minggu ke-2 & 3)"),dk(t(16,30),t(17))]
-  ].map(l=>merge(l.filter(Boolean)));
+function baseTemplate(){
+  const rh=(a,b)=>({s:a,e:b,label:"REHAT",color:COL.rehat});
+  return[0,1,2,3].map(()=>[rh(t(13),t(14))]).concat([[rh(t(12,15),t(14,45))]]);
 }
 function splitWindow(items,s,e){
   const out=[];if(!items.length)return out;
@@ -1359,14 +1348,12 @@ $("#bRoster").onclick=()=>openModal("Isi dari roster",(b,close)=>{
     if(R.tempoh)rows.push(["Tempoh",R.tempoh]);
     prev.innerHTML=`<div class="rprev">${rows.map(r=>`<div><span>${esc(r[0])}</span>${esc(r[1])}</div>`).join("")}</div>
     ${chips.length?`<p class="hint" style="margin:0 0 8px">Butang pantas: ${chips.map(c=>esc(c.alt?"["+c.name+"]":c.name)).join(", ")}</p>`:""}
-    <label class="chk"><input type="checkbox" id="rFill" checked> ${p.d?"Isi tugasan harian dari roster (AM/PM) dan rehat":"Isi jadual asas (SMRP, pemantauan staf, dokumentasi, rehat, mesyuarat)"}</label>
-    ${p.d?"":`<label class="chk" style="margin-top:6px"><input type="checkbox" id="rBlank" ${chips.length?"checked":""}> Biarkan slot perawatan kosong, saya isi wad sendiri</label>`}
-    <p class="hint">Masa jadual asas ialah anggaran dan boleh diubah selepas ini.${hasBlocks()?" Jadual sedia ada akan diganti kalau kotak pertama ditanda.":""}</p>`;
+    <label class="chk"><input type="checkbox" id="rFill" checked> ${p.d?"Isi tugasan harian dari roster (AM/PM) dan rehat":"Isi waktu rehat (Isnin–Khamis 1.00–2.00, Jumaat 12.15–2.45)"}</label>
+    <p class="hint">Slot lain dibiar kosong untuk anda isi guna butang pantas. Waktu rehat boleh diubah.${hasBlocks()?" Jadual sedia ada akan diganti kalau kotak di atas ditanda.":""}</p>`;
     act.innerHTML='<button class="btn" data-c>Batal</button><button class="btn primary" data-go>Isi carta</button>';
     act.querySelector("[data-c]").onclick=close;
     act.querySelector("[data-go]").onclick=()=>{
-      const bl=b.querySelector("#rBlank");
-      doRoster(src,chosen,b.querySelector("#rFill").checked,bl?bl.checked:false);close();
+      doRoster(src,chosen,b.querySelector("#rFill").checked);close();
     };
   };
   rl.addEventListener("click",e=>{const it=e.target.closest("[data-i]");if(!it)return;chosen={i:+it.dataset.i,p:ROSTER[src].staff[+it.dataset.i]};list();preview();});
@@ -1420,16 +1407,16 @@ $("#bRoster").onclick=()=>openModal("Isi dari roster",(b,close)=>{
   mb.addEventListener("drop",e=>{const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];handleFile(f);});
   fillSrc();list();
 });
-function doRoster(src,ch,fill,blank){
+function doRoster(src,ch,fill){
   const R=ROSTER[src],p=ch.p,lab=ch.lab;
   state.meta.nama=p.n;state.meta.kawasan=lab.kawasan||"";state.meta.penyelia=p.p||"";
   if(R.tempoh)state.meta.tempoh=R.tempoh;
-  state.note=blank?"":(lab.nota||"");
+  state.note="";
   // butang pantas wad/klinik untuk nama ini
   const chips=wardChips(p).map((c,i)=>({id:uid(),label:c.alt?`[${c.name}]`:c.name,color:WPAL[i%WPAL.length],r:true}));
   state.acts=[...chips,...state.acts.filter(a=>!a.r&&!chips.some(c=>c.label.toLowerCase()===a.label.toLowerCase()))];
   if(fill){
-    state.blocks=p.d?dailyTemplate(p.d):baseTemplate(blank?null:lab.rawat);
+    state.blocks=p.d?dailyTemplate(p.d):baseTemplate();
     const used=new Map();
     state.blocks.forEach(l=>l.forEach(x=>{if(!used.has(x.label))used.set(x.label,x.color);}));
     mergeActs([...used].map(([label,color])=>({label,color})));
@@ -1440,7 +1427,7 @@ function doRoster(src,ch,fill,blank){
   document.querySelectorAll("[data-k]").forEach(i=>i.value=state.meta[i.dataset.k]||"");
   sel=null;rep=new Set();
   autosize(title);autosize(note);renderChart();renderPanel();save();
-  toast(blank&&chips.length?"Siap. Klik slot perawatan, kemudian pilih wad anda.":"Carta diisi dari roster. Semak dan ubah mana yang perlu.");
+  toast(chips.length&&!p.d?"Siap. Rehat dah diisi. Klik slot, kemudian pilih wad atau aktiviti anda.":"Carta diisi dari roster. Semak dan ubah mana yang perlu.");
 }
 
 /* ---------- mula ---------- */
