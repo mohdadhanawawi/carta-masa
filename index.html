@@ -84,6 +84,12 @@ button{cursor:pointer}
 .chart[data-fine]{--cw:28px}
 .row{display:grid; grid-template-columns:var(--daycol) repeat(var(--n), minmax(var(--cw),1fr))}
 .row>*{grid-row:1}
+.row:not(.head){height:var(--rowh,84px)}
+.row .cell,.row .block{min-height:0}
+.block.sm{font-size:11px; padding:2px 4px}
+.block.sm span{-webkit-line-clamp:2}
+.conc{display:flex; gap:8px; align-items:flex-start; font-size:12.5px; color:var(--muted); line-height:1.35}
+.conc input{margin-top:2px}
 .row.head{background:var(--head); position:relative}
 .daycell{
   grid-column:1; position:sticky; left:0; z-index:2; background:var(--head);
@@ -279,6 +285,7 @@ textarea.json{width:100%; height:180px; border:1px solid var(--line-strong); bor
       <button class="btn primary" id="pApply">Guna</button>
     </div>
     <div class="pf">
+      <label class="conc"><input type="checkbox" id="pConc"><span>Serentak: tambah di sebelah aktiviti sedia ada (cth wad 11C, tetapi Minggu 2 &amp; 3 di Klinik SMA)</span></label>
       <div class="reps"><span>Ulang pada:</span><span id="reps"></span></div>
       <button class="btn danger" id="pClear">Padam slot ni</button>
     </div>
@@ -324,7 +331,7 @@ function normalize(o){
   if(o.v!==2&&d.time.step===30)d.time.step=15;
   if(d.time.end<t(17,30))d.time.end=t(17,30);
   if(Array.isArray(o.acts)&&o.acts.length)d.acts=o.acts.filter(a=>a&&typeof a.label==="string").map(a=>({id:String(a.id||uid()),label:a.label,color:/^#[0-9a-f]{6}$/i.test(a.color)?a.color:"#dddddd",r:!!a.r}));
-  if(Array.isArray(o.blocks))d.blocks=DAYS.map((_,i)=>Array.isArray(o.blocks[i])?o.blocks[i].filter(b=>b&&Number.isFinite(b.s)&&Number.isFinite(b.e)&&b.e>b.s&&typeof b.label==="string").map(b=>({s:b.s,e:b.e,label:b.label,color:/^#[0-9a-f]{6}$/i.test(b.color)?b.color:"#dddddd"})):[]);
+  if(Array.isArray(o.blocks))d.blocks=DAYS.map((_,i)=>Array.isArray(o.blocks[i])?o.blocks[i].filter(b=>b&&Number.isFinite(b.s)&&Number.isFinite(b.e)&&b.e>b.s&&typeof b.label==="string").map(b=>({s:b.s,e:b.e,label:b.label,color:/^#[0-9a-f]{6}$/i.test(b.color)?b.color:"#dddddd",...(b.l>0&&b.l<6?{l:Math.floor(b.l)}:{})})):[]);
   return d;
 }
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -332,6 +339,7 @@ const uid=()=>Math.random().toString(36).slice(2,9);
 let state=defaults();
 try{const raw=localStorage.getItem(KEY);if(raw)state=normalize(JSON.parse(raw));}catch(e){}
 
+let conc=false;
 let sel=null;          // {day,a,b,anchor,done,fromBlock}
 let rep=new Set();     // hari lain untuk ulang
 let drag=null, suppress=false, saveTimer=null;
@@ -349,9 +357,10 @@ function save(){
 function autosize(el){el.style.height="auto";el.style.height=el.scrollHeight+"px";}
 
 /* ---------- layout blok ke slot ---------- */
-function layout(d){
+const laneCount=d=>Math.max(1,...state.blocks[d].map(b=>(b.l||0)+1));
+function layout(d,lane=0){
   const N=nSlots(),{start,step}=state.time;
-  const list=[...state.blocks[d]].sort((x,y)=>x.s-y.s);
+  const list=state.blocks[d].filter(b=>(b.l||0)===lane).sort((x,y)=>x.s-y.s);
   const out=[];let cursor=0;
   for(const b of list){
     let si=Math.floor((b.s-start)/step),ei=Math.ceil((b.e-start)/step);
@@ -363,6 +372,24 @@ function layout(d){
   }
   for(let i=cursor;i<N;i++)out.push({cell:true,i});
   return out;
+}
+function dayItems(d){
+  const NL=laneCount(d),N=nSlots(),out=[];
+  const split=Array(N).fill(false),rowOnly=Array(N).fill(false);
+  for(let k=1;k<NL;k++)for(const it of layout(d,k))if(!it.cell)for(let x=it.i;x<it.i+it.len;x++)split[x]=true;
+  for(const it of layout(d,0)){
+    if(it.cell){const sp=split[it.i];if(sp)rowOnly[it.i]=true;out.push({...it,lane:0,full:!sp});}
+    else{
+      let ro=false;for(let x=it.i;x<it.i+it.len;x++)if(split[x])ro=true;
+      if(ro)for(let x=it.i;x<it.i+it.len;x++)rowOnly[x]=true;
+      out.push({...it,lane:0,full:!ro});
+    }
+  }
+  for(let k=1;k<NL;k++)for(const it of layout(d,k)){
+    if(it.cell){if(split[it.i]||rowOnly[it.i])out.push({...it,lane:k,full:false});}
+    else out.push({...it,lane:k,full:false});
+  }
+  return{NL,items:out};
 }
 
 /* ---------- render ---------- */
@@ -389,15 +416,20 @@ function renderChart(){
     }
   }
   h+="</div>";
+  let maxNL=1;for(let d=0;d<DAYS.length;d++)maxNL=Math.max(maxNL,laneCount(d));
+  chart.style.setProperty("--rowh",Math.max(84,46*maxNL)+"px");
   for(let d=0;d<DAYS.length;d++){
-    h+=`<div class="row"><div class="daycell">${DAYS[d]}</div>`;
-    for(const it of layout(d)){
-      const inSel=x=>sel&&sel.day===d&&x>=sel.a&&x<=sel.b;
+    const DI=dayItems(d),NL=DI.NL;
+    h+=`<div class="row" style="grid-template-rows:repeat(${NL},minmax(0,1fr))"><div class="daycell" style="grid-row:1 / span ${NL}">${DAYS[d]}</div>`;
+    for(const it of DI.items){
+      const gr=it.full?`1 / span ${NL}`:`${it.lane+1}`;
+      const inSel=x=>sel&&sel.day===d&&(sel.lane||0)===it.lane&&x>=sel.a&&x<=sel.b;
       if(it.cell){
-        h+=`<div class="cell${inSel(it.i)?" sel":""}" data-day="${d}" data-i="${it.i}" style="grid-column:${it.i+2}"></div>`;
+        h+=`<div class="cell${inSel(it.i)?" sel":""}" data-day="${d}" data-lane="${it.lane}" data-i="${it.i}" style="grid-column:${it.i+2};grid-row:${gr}"></div>`;
       }else{
-        const end=it.i+it.len-1,hit=sel&&sel.day===d&&it.i<=sel.b&&end>=sel.a;
-        h+=`<div class="block${it.len*(step<30?28:40)<=90?" narrow":""}${hit?" sel":""}" data-day="${d}" data-i="${it.i}" data-end="${end}" style="grid-column:${it.i+2} / span ${it.len};background:${it.b.color};color:${ink(it.b.color)}"><span>${esc(it.b.label)}</span></div>`;
+        const end=it.i+it.len-1,hit=sel&&sel.day===d&&(sel.lane||0)===it.lane&&it.i<=sel.b&&end>=sel.a;
+        const narrow=it.full&&it.len*(step<30?28:40)<=90;
+        h+=`<div class="block${narrow?" narrow":""}${it.full?"":" sm"}${hit?" sel":""}" data-day="${d}" data-lane="${it.lane}" data-i="${it.i}" data-end="${end}" style="grid-column:${it.i+2} / span ${it.len};grid-row:${gr};background:${it.b.color};color:${ink(it.b.color)}"><span>${esc(it.b.label)}</span></div>`;
       }
     }
     h+="</div>";
@@ -417,15 +449,17 @@ function renderPanel(){
   $("#selTo").innerHTML=opt(1,N,sel.b+1);
   $("#chips").innerHTML=state.acts.map((a,i)=>`<button class="chip${a.r?" r":""}" data-a="${i}" style="--c:${a.color};--t:${ink(a.color)}">${esc(a.label)}</button>`).join("");
   $("#reps").innerHTML=DAYS_S.map((s,i)=>`<button class="day-chip${i===sel.day||rep.has(i)?" on":""}" data-r="${i}"${i===sel.day?" disabled":""}>${s}</button>`).join(" ");
+  $("#pConc").checked=conc;
   p.classList.add("on");document.body.classList.add("has-panel");
 }
 function setSel(s,fillFromBlock){
   const dayChanged=!sel||(s&&sel.day!==s.day);
   sel=s;
   if(!s||dayChanged)rep=new Set();
+  conc=false;
   if(s){
     const{start,step}=state.time,ms=start+s.a*step;
-    const blk=s.fromBlock?state.blocks[s.day].find(b=>b.s<start+(s.b+1)*step&&b.e>ms):null;
+    const blk=s.fromBlock?state.blocks[s.day].find(b=>(b.l||0)===(s.lane||0)&&b.s<start+(s.b+1)*step&&b.e>ms):null;
     $("#cText").value=blk?blk.label:"";
     if(blk)$("#cColor").value=blk.color;
   }
@@ -433,30 +467,40 @@ function setSel(s,fillFromBlock){
 }
 
 /* ---------- ubah data ---------- */
-function cut(list,s,e){
+function cut(list,s,e,lane=0){
   const out=[];
   for(const b of list){
-    if(b.e<=s||b.s>=e){out.push(b);continue;}
+    if((b.l||0)!==lane||b.e<=s||b.s>=e){out.push(b);continue;}
     if(b.s<s)out.push({...b,e:s});
     if(b.e>e)out.push({...b,s:e});
   }
   return out;
 }
 function merge(list){
-  const L=[...list].sort((x,y)=>x.s-y.s),out=[];
-  for(const b of L){
-    const p=out[out.length-1];
-    if(p&&p.e===b.s&&p.label===b.label&&p.color===b.color)p.e=b.e;else out.push({...b});
+  const lanes=[...new Set(list.map(b=>b.l||0))].sort((x,y)=>x-y),res=[];
+  for(const ln of lanes){
+    const L=list.filter(b=>(b.l||0)===ln).sort((x,y)=>x.s-y.s),out=[];
+    for(const b of L){
+      const p=out[out.length-1];
+      if(p&&p.e===b.s&&p.label===b.label&&p.color===b.color)p.e=b.e;else out.push({...b});
+    }
+    res.push(...out);
   }
-  return out;
+  return res;
+}
+function freeLane(list,s,e){
+  for(let k=1;k<6;k++)if(!list.some(b=>(b.l||0)===k&&b.s<e&&b.e>s))return k;
+  return 5;
 }
 function applyBlock(label,color,clear){
   if(!sel)return;
   const{start,step}=state.time,s=start+sel.a*step,e=start+(sel.b+1)*step;
   const days=[sel.day,...rep];
   for(const d of days){
-    let L=cut(state.blocks[d],s,e);
-    if(!clear)L.push({s,e,label,color});
+    let L;
+    if(clear){const ln=d===sel.day?(sel.lane||0):0;L=cut(state.blocks[d],s,e,ln);}
+    else if(conc){const ln=freeLane(state.blocks[d],s,e);L=[...state.blocks[d],{s,e,label,color,l:ln}];}
+    else{const ln=d===sel.day?(sel.lane||0):0;L=cut(state.blocks[d],s,e,ln);L.push({s,e,label,color,...(ln?{l:ln}:{})});}
     state.blocks[d]=merge(L);
   }
   sel=null;rep=new Set();
@@ -468,7 +512,7 @@ const chart=$("#chart");
 chart.addEventListener("pointerdown",e=>{
   if(e.pointerType!=="mouse"||e.button!==0)return;
   const el=e.target.closest("[data-day]");if(!el)return;
-  drag={day:+el.dataset.day,from:+el.dataset.i,moved:false};
+  if(el.dataset.end)return;drag={day:+el.dataset.day,from:+el.dataset.i,moved:false};
 });
 chart.addEventListener("pointermove",e=>{
   if(!drag)return;
@@ -478,7 +522,7 @@ chart.addEventListener("pointermove",e=>{
   if(el.dataset.end&&i>drag.from)i=+el.dataset.end;
   if(i!==drag.from)drag.moved=true;
   if(drag.moved){
-    sel={day:drag.day,a:Math.min(drag.from,i),b:Math.max(drag.from,i),anchor:drag.from,done:true};
+    sel={day:drag.day,lane:0,a:Math.min(drag.from,i),b:Math.max(drag.from,i),anchor:drag.from,done:true};
     renderChart();
   }
 });
@@ -489,13 +533,13 @@ window.addEventListener("pointerup",()=>{
 chart.addEventListener("click",e=>{
   if(suppress)return;
   const el=e.target.closest("[data-day]");if(!el)return;
-  const d=+el.dataset.day,i=+el.dataset.i;
-  if(el.dataset.end){setSel({day:d,a:i,b:+el.dataset.end,done:true,fromBlock:true});return;}
+  const d=+el.dataset.day,i=+el.dataset.i,ln=+el.dataset.lane||0;
+  if(el.dataset.end){setSel({day:d,lane:ln,a:i,b:+el.dataset.end,done:true,fromBlock:true});return;}
   if(sel&&sel.day===d&&!sel.fromBlock&&!sel.done){
     if(i===sel.anchor){setSel(null);return;}
-    setSel({day:d,a:Math.min(sel.anchor,i),b:Math.max(sel.anchor,i),anchor:sel.anchor,done:true});return;
+    setSel({day:d,lane:0,a:Math.min(sel.anchor,i),b:Math.max(sel.anchor,i),anchor:sel.anchor,done:true});return;
   }
-  setSel({day:d,a:i,b:i,anchor:i,done:false});
+  setSel({day:d,lane:0,a:i,b:i,anchor:i,done:false});
 });
 document.addEventListener("keydown",e=>{if(e.key==="Escape"){const m=document.querySelector(".overlay");if(m)m.remove();else if(sel)setSel(null);}});
 
@@ -516,6 +560,7 @@ $("#pApply").addEventListener("click",()=>{
 $("#cText").addEventListener("keydown",e=>{if(e.key==="Enter")$("#pApply").click();});
 $("#pClear").addEventListener("click",()=>applyBlock("","#ffffff",true));
 $("#pCancel").addEventListener("click",()=>setSel(null));
+$("#pConc").addEventListener("change",e=>{conc=e.target.checked;});
 $("#selFrom").addEventListener("change",e=>{if(!sel)return;sel.a=+e.target.value;if(sel.b<sel.a)sel.b=sel.a;sel.done=true;renderChart();renderPanel();});
 $("#selTo").addEventListener("change",e=>{if(!sel)return;sel.b=+e.target.value-1;if(sel.b<sel.a)sel.a=sel.b;sel.done=true;renderChart();renderPanel();});
 
@@ -859,20 +904,21 @@ function drawChart(){
     const ry=y+headH+d*rowH;
     c.fillStyle=HEAD;c.fillRect(gx,ry,dayW,rowH);
     c.font=`700 34px ${F}`;c.fillStyle=INK;c.textAlign="center";c.fillText(DAYS[d],gx+dayW/2,ry+rowH/2);
-    for(const it of layout(d)){
-      const x=gx+dayW+it.i*cw;
+    const DI=dayItems(d),rl=rowH/DI.NL;
+    for(const it of DI.items){
+      const x=gx+dayW+it.i*cw,yy=ry+(it.full?0:it.lane*rl),rh=it.full?rowH:rl;
       if(it.cell){
-        c.strokeStyle=LINE;c.lineWidth=1;c.strokeRect(x,ry,cw,rowH);
+        c.strokeStyle=LINE;c.lineWidth=1;c.strokeRect(x,yy,cw,rh);
       }else{
         const w=it.len*cw;
-        c.fillStyle=it.b.color;c.fillRect(x,ry,w,rowH);
-        c.strokeStyle="rgba(0,0,0,.35)";c.lineWidth=1.5;c.strokeRect(x,ry,w,rowH);
-        const narrow=w<(rowH*0.55);
+        c.fillStyle=it.b.color;c.fillRect(x,yy,w,rh);
+        c.strokeStyle="rgba(0,0,0,.35)";c.lineWidth=1.5;c.strokeRect(x,yy,w,rh);
+        const narrow=it.full&&w<(rh*0.55);
         if(narrow){
-          c.save();c.translate(x+w/2,ry+rowH/2);c.rotate(Math.PI/2);
-          drawFit(c,F,it.b.label,0,0,rowH,w,ink(it.b.color));
+          c.save();c.translate(x+w/2,yy+rh/2);c.rotate(Math.PI/2);
+          drawFit(c,F,it.b.label,0,0,rh,w,ink(it.b.color));
           c.restore();
-        }else drawFit(c,F,it.b.label,x+w/2,ry+rowH/2,w,rowH,ink(it.b.color));
+        }else drawFit(c,F,it.b.label,x+w/2,yy+rh/2,w,rh,ink(it.b.color));
       }
     }
     c.strokeStyle=LINE;c.lineWidth=1.5;c.beginPath();c.moveTo(gx,ry+rowH);c.lineTo(gx+gw,ry+rowH);c.stroke();
